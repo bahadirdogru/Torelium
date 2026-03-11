@@ -1,0 +1,47 @@
+{
+    "manifest_version": 3,
+    "name": "Torelium Stealth Core",
+    "version": "7.6",
+    "description": "Advanced Anti-Fingerprint and Stealth Engine",
+    "icons": {
+        "128": "icon128.png"
+    },
+    "incognito": "split",
+    "permissions": ["privacy", "debugger", "tabs"],
+    "host_permissions": [
+        "http://127.0.0.1/*",
+        "http://localhost/*",
+        "https://check.torproject.org/*"
+    ],
+    "action": {
+        "default_popup": "popup.html",
+        "default_title": "Torelium Stealth Core",
+        "default_icon": {
+            "128": "icon128.png"
+        }
+    },
+    "background": {
+        "service_worker": "background.js"
+    },
+    "content_scripts": [
+        {
+            "matches": ["<all_urls>"],
+            "js": ["spoof.js"],
+            "run_at": "document_start",
+            "world": "MAIN",
+            "all_frames": true,
+            "match_about_blank": true
+        },
+        {
+            "matches": ["https://abrahamjuliot.github.io/creepjs/*"],
+            "js": ["creep_scraper.js"],
+            "run_at": "document_idle"
+        }
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": ["checklist.html", "checklist.js"],
+            "matches": ["<all_urls>"]
+        }
+    ]
+}

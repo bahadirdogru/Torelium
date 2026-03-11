@@ -1,0 +1,24 @@
+# Torelium Stealth Browser - .gitignore
+
+# Local Binaries (Downloaded dynamically)
+tor/
+helium/
+tor-expert-bundle.tar.gz
+helium.zip
+
+# Logs and Data
+tor.log
+creepjs-logs/
+helium_profiles/
+
+# PowerShell artifacts
+*.log
+*.tmp
+
+# Extension build/temporary artifacts
+extension/.DS_Store
+extension/Thumbs.db
+
+# OS specific files
+.DS_Store
+Thumbs.db

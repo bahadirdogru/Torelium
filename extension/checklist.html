@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Torelium · Gizlilik Kontrol Paneli</title>
+<style>
+
+
+  :root {
+    --bg: #0a0c12;
+    --surface: #111520;
+    --surface2: #161b28;
+    --border: rgba(255,255,255,0.06);
+    --text: #e2e8f0;
+    --text-muted: #64748b;
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #f59e0b;
+    --purple: #8b5cf6;
+    --indigo: #6366f1;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px;
+  }
+
+  .page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 28px;
+  }
+
+  .logo-area {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .logo-icon {
+    width: 44px; height: 44px;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+  }
+
+  .logo-area h1 {
+    font-size: 20px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #a5b4fc, #c4b5fd);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .logo-area p {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
+  }
+
+  .tab {
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: all 0.2s;
+  }
+
+  .tab:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+  .tab.active { background: var(--indigo); color: #fff; }
+
+  .view-panel { display: none; }
+  .view-panel.active { display: block; }
+
+  /* CreepJS Frame */
+  .creep-frame-container {
+    width: 100%;
+    height: calc(100vh - 180px);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  #creepFrame {
+    width: 100%;
+    height: 100%;
+    border: none;
+  }
+
+  .btn-creepjs {
+    background: linear-gradient(135deg, #1e2035, #2d1f4e);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    color: #c4b5fd;
+    padding: 9px 16px;
+    border-radius: 10px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    text-decoration: none;
+  }
+
+  .btn-creepjs:hover {
+    background: linear-gradient(135deg, #252845, #3b2868);
+    border-color: rgba(139, 92, 246, 0.6);
+    box-shadow: 0 4px 16px rgba(139, 92, 246, 0.2);
+  }
+
+  .btn-refresh {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 9px 14px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    transition: all 0.2s;
+  }
+
+  .btn-refresh:hover {
+    background: rgba(255,255,255,0.09);
+    color: var(--text);
+  }
+
+  /* Summary banner */
+  .summary-banner {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 22px;
+  }
+
+  .score-ring {
+    width: 60px; height: 60px;
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .score-ring svg { transform: rotate(-90deg); }
+
+  .score-text {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    line-height: 1;
+  }
+
+  .score-text .num {
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--green);
+    font-family: 'Consolas', 'Courier New', monospace;
+  }
+
+  .score-text .den {
+    font-size: 9px;
+    color: var(--text-muted);
+  }
+
+  .summary-info h2 {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 3px;
+  }
+
+  .summary-info p {
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+
+  .summary-badges {
+    margin-left: auto;
+    display: flex;
+    gap: 6px;
+  }
+
+  .badge {
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 10.5px;
+    font-weight: 600;
+  }
+
+  .badge.pass { background: rgba(34,197,94,0.12); color: #86efac; }
+  .badge.fail { background: rgba(239,68,68,0.12); color: #fca5a5; }
+  .badge.warn { background: rgba(245,158,11,0.12); color: #fcd34d; }
+
+  /* Grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 12px;
+  }
+
+  .check-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    transition: border-color 0.2s;
+  }
+
+  .check-card:hover { border-color: rgba(99,102,241,0.25); }
+
+  .check-card.pass { border-left: 3px solid var(--green); }
+  .check-card.fail { border-left: 3px solid var(--red); }
+  .check-card.warn { border-left: 3px solid var(--yellow); }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .card-icon {
+    font-size: 16px;
+    width: 24px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  .card-title {
+    font-size: 12.5px;
+    font-weight: 600;
+    flex: 1;
+  }
+
+  .card-status {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 5px;
+  }
+
+  .card-status.pass { background: rgba(34,197,94,0.15); color: #86efac; }
+  .card-status.fail { background: rgba(239,68,68,0.15); color: #fca5a5; }
+  .card-status.warn { background: rgba(245,158,11,0.15); color: #fcd34d; }
+
+  .card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .value-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .value-label {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .value-actual {
+    font-size: 10.5px;
+    font-family: 'Consolas', 'Courier New', monospace;
+    color: var(--text);
+    text-align: right;
+    word-break: break-all;
+    max-width: 200px;
+  }
+
+  .value-actual.good { color: #86efac; }
+  .value-actual.bad  { color: #fca5a5; }
+  .value-actual.warn { color: #fcd34d; }
+
+  .section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin: 18px 0 10px;
+  }
+
+  .loading {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .spinner {
+    width: 32px; height: 32px;
+    border: 2px solid rgba(99,102,241,0.2);
+    border-top-color: var(--indigo);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto 12px;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <div class="logo-area">
+    <div class="logo-icon">🛡️</div>
+    <div>
+      <h1>Gizlilik Kontrol Paneli</h1>
+      <p>Torelium Stealth Engine · v7.6 · Canlı API Testi</p>
+    </div>
+  </div>
+  <div class="header-actions">
+    <button class="btn-refresh" id="btnRefresh">↻ Yenile</button>
+    <a class="btn-creepjs" href="https://abrahamjuliot.github.io/creepjs/" target="_blank">
+      🔍 CreepJS'te Test Et
+    </a>
+  </div>
+</div>
+
+<div id="toreliumView" class="container">
+  <div class="summary-banner" id="summaryBanner">
+    <div class="loading"><div class="spinner"></div>Testler çalıştırılıyor...</div>
+  </div>
+  <div id="checkGrid"></div>
+</div>
+
+<script src="checklist.js"></script>
+</body>
+</html>
