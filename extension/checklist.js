@@ -23,6 +23,11 @@ const EXPECTED = {
 };
 
 function eq(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = String(str);
+    return d.innerHTML;
+}
 function trunc(val, n = 50) {
     const s = String(val);
     return s.length > n ? s.slice(0, n) + '…' : s;
@@ -143,17 +148,16 @@ function checks() {
     // 10. Timezone
     let tz = 'Bilinmiyor';
     try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch(_) {}
-    const cdpActive = window.to_cdp_active || false;
     const tzOk = tz === EXPECTED.timezone;
-    
+
     results.push({
         icon: '🕐', title: 'Timezone',
         category: 'Lokalizasyon',
-        status: tzOk ? 'pass' : (cdpActive ? 'fail' : 'warn'),
+        status: tzOk ? 'pass' : 'warn',
         rows: [
             { label: 'Gerçek Değer', value: tz, good: tzOk },
             { label: 'Beklenen',     value: EXPECTED.timezone, neutral: true },
-            { label: 'CDP Durumu',   value: cdpActive ? '✅ Bağlı' : '⚠️ Bağlı Değil (Bekleyin/Yenileyin)', bad: !cdpActive, good: cdpActive }
+            { label: 'CDP Durumu',   value: tzOk ? '✅ Aktif' : '⚠️ Bekleniyor (Sayfayı yenileyin)', bad: !tzOk, good: tzOk }
         ]
     });
 
@@ -280,15 +284,15 @@ function renderCard(item) {
     const valueClass = (r) => r.good ? 'good' : r.warn ? 'warn' : r.bad ? 'bad' : '';
     const rows = item.rows.map(r => `
         <div class="value-row">
-            <span class="value-label">${r.label}</span>
-            <span class="value-actual ${valueClass(r)}">${r.value}</span>
+            <span class="value-label">${escapeHtml(r.label)}</span>
+            <span class="value-actual ${valueClass(r)}">${escapeHtml(r.value)}</span>
         </div>`).join('');
 
     return `
     <div class="check-card ${item.status}">
       <div class="card-header">
-        <span class="card-icon">${item.icon}</span>
-        <span class="card-title">${item.title}</span>
+        <span class="card-icon">${escapeHtml(item.icon)}</span>
+        <span class="card-title">${escapeHtml(item.title)}</span>
         <span class="card-status ${item.status}">${statusLabel(item.status)}</span>
       </div>
       <div class="card-body">${rows}</div>
@@ -386,7 +390,7 @@ async function runChecks() {
     const groups = groupByCategory(results);
     let html = '';
     for (const [cat, items] of Object.entries(groups)) {
-        html += `<div class="section-title">${cat}</div><div class="grid">`;
+        html += `<div class="section-title">${escapeHtml(cat)}</div><div class="grid">`;
         html += items.map(renderCard).join('');
         html += `</div>`;
     }

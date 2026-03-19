@@ -1,6 +1,4 @@
 (() => {
-    console.log("[TORELIUM] CreepJS Scraper Active");
-
     function scrape() {
         // Try to find the FP ID
         const fpIdEl = document.querySelector('.fingerprint-header .ellipsis-all');

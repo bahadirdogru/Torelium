@@ -1,6 +1,5 @@
 // ===== WEBRTC LOCK =====
 chrome.privacy.network.webRTCIPHandlingPolicy.set({ value: 'disable_non_proxied_udp' });
-console.log("[STEALTH] WebRTC tightly locked via privacy API.");
 
 // ===== TIMEZONE / LOCALE via CDP =====
 const TZ = "America/New_York";
@@ -9,16 +8,10 @@ const LOCALE = "en-US";
 function spoofTarget(targetArg) {
     chrome.debugger.attach(targetArg, "1.3", () => {
         if (chrome.runtime.lastError) {
-            // If already attached, we just send commands
             if (!chrome.runtime.lastError.message.includes("already attached")) return;
         }
         chrome.debugger.sendCommand(targetArg, "Emulation.setTimezoneOverride", { timezoneId: TZ }, () => {
-            chrome.debugger.sendCommand(targetArg, "Emulation.setLocaleOverride", { locale: LOCALE }, () => {
-                // Signal to the page that CDP is active
-                chrome.debugger.sendCommand(targetArg, "Runtime.evaluate", { 
-                    expression: "window.to_cdp_active = true; console.log('[TORELIUM] CDP Core Attached');" 
-                });
-            });
+            chrome.debugger.sendCommand(targetArg, "Emulation.setLocaleOverride", { locale: LOCALE }, () => {});
         });
     });
 }
@@ -26,12 +19,10 @@ function spoofTarget(targetArg) {
 setInterval(() => {
     chrome.debugger.getTargets((targets) => {
         for (let t of targets) {
-            // We want to spoof regular pages and our own extension pages
-            // But we avoid system pages like 'devtools', 'helium', or internal 'chrome://' settings
             if ((t.type === "page" || t.type === "background_page") && !t.attached) {
                 const url = t.url || "";
                 const isSystem = url.startsWith("chrome://") || url.startsWith("helium://") || url.startsWith("devtools://");
-                
+
                 if (!isSystem) {
                     let targetArg = t.tabId ? { tabId: t.tabId } : { targetId: t.id };
                     spoofTarget(targetArg);
@@ -47,15 +38,32 @@ let latestCreepSummary = null;
 
 // ===== TOR BRIDGE (PowerShell Listener) =====
 const BRIDGE_URL = "http://127.0.0.1:9060";
+let BRIDGE_TOKEN = null;
+
+const tokenReady = (async () => {
+    for (let attempt = 0; attempt < 10; attempt++) {
+        try {
+            const resp = await fetch(chrome.runtime.getURL('bridge_config.json'));
+            const config = await resp.json();
+            if (config.token) {
+                BRIDGE_TOKEN = config.token;
+                return;
+            }
+        } catch (e) {}
+        await new Promise(r => setTimeout(r, 500));
+    }
+})();
 
 async function torBridgeRequest(command, params = {}) {
+    await tokenReady;
     try {
         const url = new URL(`${BRIDGE_URL}/${command}`);
         Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
-        const resp = await fetch(url, { cache: 'no-store' });
+        const headers = {};
+        if (BRIDGE_TOKEN) headers['X-Bridge-Token'] = BRIDGE_TOKEN;
+        const resp = await fetch(url, { cache: 'no-store', headers });
         return await resp.json();
     } catch (e) {
-        console.error(`[BRIDGE] Request failed: ${command}`, e);
         return { success: false, error: 'bridge_down' };
     }
 }
@@ -71,7 +79,6 @@ async function getCountryForIP(ip) {
     return res.success ? res.country : null;
 }
 
-// Country code → flag emoji (Internal helper, kept)
 function countryToFlag(code) {
     if (!code || code.length !== 2) return '🌐';
     return [...code.toUpperCase()].map(c =>
@@ -89,13 +96,13 @@ async function getTorExitIP() {
         const data = await resp.json();
         return { ip: data.IP || null, isTor: data.IsTor || false };
     } catch (e) {
-        console.error("[STEALTH] IP Fetch Error:", e);
-        return { ip: null, isTor: false, error: e.message };
+        return { ip: null, isTor: false, error: 'fetch_failed' };
     }
 }
 
 // ===== MESSAGE LISTENER =====
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (sender.id !== chrome.runtime.id) return false;
 
     if (request.action === "getCircuitInfo") {
         (async () => {
@@ -117,7 +124,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     count:   newnymCount
                 });
             } catch (err) {
-                console.error("Critical error in getCircuitInfo:", err);
                 sendResponse({ ip: null, isTor: false, error: 'critical' });
             }
         })();
@@ -133,8 +139,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             } else {
                 sendResponse({ success: false, message: result.error === 'bridge_down' ? "Hata: Torelium Bridge aktif değil. Lütfen .ps1 scriptini kontrol edin." : "Yeni kimlik alınamadı." });
             }
-        }).catch(e => {
-            sendResponse({ success: false, message: "Sistem Hatası: " + e.message });
+        }).catch(() => {
+            sendResponse({ success: false, message: "Sistem hatası oluştu." });
         });
         return true;
     }
@@ -146,7 +152,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (request.action === "updateCreepSummary") {
         latestCreepSummary = request.data;
-        console.log("[TORELIUM] Scraped new CreepJS Summary:", latestCreepSummary.fpId);
         return false;
     }
 

@@ -3,9 +3,6 @@
     "name": "Torelium Stealth Core",
     "version": "7.6",
     "description": "Advanced Anti-Fingerprint and Stealth Engine",
-    "icons": {
-        "128": "icon128.png"
-    },
     "incognito": "split",
     "permissions": ["privacy", "debugger", "tabs"],
     "host_permissions": [
@@ -15,10 +12,7 @@
     ],
     "action": {
         "default_popup": "popup.html",
-        "default_title": "Torelium Stealth Core",
-        "default_icon": {
-            "128": "icon128.png"
-        }
+        "default_title": "Torelium Stealth Core"
     },
     "background": {
         "service_worker": "background.js"
@@ -38,10 +32,5 @@
             "run_at": "document_idle"
         }
     ],
-    "web_accessible_resources": [
-        {
-            "resources": ["checklist.html", "checklist.js"],
-            "matches": ["<all_urls>"]
-        }
-    ]
+    "web_accessible_resources": []
 }

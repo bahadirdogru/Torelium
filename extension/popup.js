@@ -120,7 +120,7 @@ function requestNewnym() {
 
 // ---- Checklist ----
 function openChecklist() {
-    chrome.tabs.create({ url: "checklist.html" }, () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL("checklist.html") }, () => {
         window.close();
     });
 }

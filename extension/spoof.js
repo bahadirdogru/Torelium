@@ -1,35 +1,54 @@
 (() => {
     const isIframe = window.self !== window.top;
-    console.log(`[STEALTH] Torelium Stealth Engine v7.5.3 Loading... (Context: ${isIframe ? 'Iframe' : 'Main Window'})`);
-    
-    // === TOSTRING() SPOOFING (Zero-Trace Native Binding) ===
+
+    // === TOSTRING() SPOOFING (Zero-Trace Native Binding with Recursion Guard) ===
     const originalToString = Function.prototype.toString;
     const spoofedFunctions = new WeakMap();
+    let inToString = false;
 
     function toString() {
-        if (typeof this === 'function' && spoofedFunctions.has(this)) {
-            return spoofedFunctions.get(this);
+        if (inToString) return originalToString.call(this);
+        inToString = true;
+        try {
+            if (typeof this === 'function' && spoofedFunctions.has(this)) {
+                return spoofedFunctions.get(this);
+            }
+            return originalToString.apply(this, arguments);
+        } finally {
+            inToString = false;
         }
-        return originalToString.apply(this, arguments);
     }
     Object.defineProperty(toString, "name", { value: "toString" });
     Object.defineProperty(toString, "length", { value: 0 });
-    Object.setPrototypeOf(toString, Function.prototype); 
-    
+    Object.setPrototypeOf(toString, Function.prototype);
+
     spoofedFunctions.set(toString, 'function toString() { [native code] }');
     Function.prototype.toString = toString;
+
+    // Harden Object.prototype.toString against function type probing
+    const originalObjectToString = Object.prototype.toString;
+    const objectToStringProxy = function toString() {
+        if (typeof this === 'function' && spoofedFunctions.has(this)) {
+            return '[object Function]';
+        }
+        return originalObjectToString.call(this);
+    };
+    Object.defineProperty(objectToStringProxy, "name", { value: "toString" });
+    Object.defineProperty(objectToStringProxy, "length", { value: 0 });
+    spoofedFunctions.set(objectToStringProxy, 'function toString() { [native code] }');
+    Object.prototype.toString = objectToStringProxy;
 
     const hookFunction = (obj, methodName, newFunc, fakeName, isGetter = false) => {
         try {
             const originalAttr = Object.getOwnPropertyDescriptor(obj, methodName);
             const original = isGetter ? (originalAttr ? originalAttr.get : undefined) : obj[methodName];
-            
+
             if (original) {
                 Object.setPrototypeOf(newFunc, Object.getPrototypeOf(original));
                 Object.defineProperty(newFunc, "name", { value: fakeName || original.name || methodName });
                 Object.defineProperty(newFunc, "length", { value: original.length || 0 });
             }
-            
+
             if (isGetter) {
                 Object.defineProperty(obj, methodName, {
                     get: newFunc,
@@ -61,7 +80,7 @@
         vendor: 'Google Inc.',
         maxTouchPoints: 0
     };
-    
+
     for (const [key, value] of Object.entries(spoofValues)) {
         hookFunction(navProto, key, function() { return value; }, `get ${key}`, true);
     }
@@ -73,12 +92,32 @@
     hookFunction(screenProto, 'availWidth', function availWidth() { return hwProfile.screenW; }, 'get availWidth', true);
     hookFunction(screenProto, 'availHeight', function availHeight() { return hwProfile.screenH - 40; }, 'get availHeight', true);
 
-    // === 4. CANVAS STABLE BYPASS ===
+    // === 4. CANVAS STABLE BYPASS (Seed-based, session-consistent noise) ===
+    const sessionSeed = crypto.getRandomValues(new Uint32Array(1))[0];
+
+    function contentHash(data, len) {
+        let h = sessionSeed;
+        const step = Math.max(1, Math.floor(len / 32));
+        for (let i = 0; i < len; i += step) {
+            h = ((h << 5) - h + data[i]) | 0;
+        }
+        return h >>> 0;
+    }
+
     const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData;
     hookFunction(CanvasRenderingContext2D.prototype, 'getImageData', function getImageData() {
         const res = originalGetImageData.apply(this, arguments);
-        if (res && res.data && res.data.length > 4) {
-            res.data[res.data.length - 1] = res.data[res.data.length - 1] ^ 1;
+        if (res && res.data && res.data.length > 16) {
+            let seed = contentHash(res.data, res.data.length);
+            const points = Math.min(10, Math.floor(res.data.length / 40));
+            const step = Math.max(4, Math.floor(res.data.length / points));
+            for (let i = 0; i < points; i++) {
+                seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+                const idx = (i * step) + (seed % 3);
+                if (idx < res.data.length - 1) {
+                    res.data[idx] = res.data[idx] ^ (1 + (seed & 1));
+                }
+            }
         }
         return res;
     }, 'getImageData');
@@ -87,7 +126,7 @@
     hookFunction(CanvasRenderingContext2D.prototype, 'measureText', function measureText() {
         const measurement = originalMeasureText.apply(this, arguments);
         const offset = 0.0000000000001;
-        return { 
+        return {
             width: measurement.width + offset,
             actualBoundingBoxAscent: measurement.actualBoundingBoxAscent,
             actualBoundingBoxDescent: measurement.actualBoundingBoxDescent,
@@ -98,11 +137,25 @@
         };
     }, 'measureText');
 
-    // === 5. WEBGL CONSISTENCY ===
+    // === 5. WEBGL CONSISTENCY (Full GPU profile for RTX 3060) ===
     const webglParameters = {
-        37445: hwProfile.vendor, 
-        37446: hwProfile.gpu     
+        37445: hwProfile.vendor,                          // UNMASKED_VENDOR_WEBGL
+        37446: hwProfile.gpu,                             // UNMASKED_RENDERER_WEBGL
+        3379:  16384,                                     // MAX_TEXTURE_SIZE
+        3386:  new Int32Array([32768, 32768]),             // MAX_VIEWPORT_DIMS
+        34024: 16384,                                     // MAX_RENDERBUFFER_SIZE
+        34076: 16384,                                     // MAX_CUBE_MAP_TEXTURE_SIZE
+        34930: 32,                                        // MAX_TEXTURE_IMAGE_UNITS
+        35660: 32,                                        // MAX_VERTEX_TEXTURE_IMAGE_UNITS
+        35661: 192,                                       // MAX_COMBINED_TEXTURE_IMAGE_UNITS
+        34921: 16,                                        // MAX_VERTEX_ATTRIBS
+        36347: 31,                                        // MAX_VARYING_VECTORS
+        36348: 4096,                                      // MAX_VERTEX_UNIFORM_VECTORS
+        36349: 1024,                                      // MAX_FRAGMENT_UNIFORM_VECTORS
+        33901: new Float32Array([1, 7.375]),               // ALIASED_LINE_WIDTH_RANGE
+        33902: new Float32Array([1, 2048]),                // ALIASED_POINT_SIZE_RANGE
     };
+
     const originalGetParameter = WebGLRenderingContext.prototype.getParameter;
     hookFunction(WebGLRenderingContext.prototype, 'getParameter', function getParameter(param) {
         return webglParameters.hasOwnProperty(param) ? webglParameters[param] : originalGetParameter.call(this, param);
@@ -165,15 +218,8 @@
         Object.defineProperty(Intl.DateTimeFormat, 'name', { value: 'DateTimeFormat' });
         spoofedFunctions.set(Intl.DateTimeFormat, "function DateTimeFormat() { [native code] }");
 
-        const originalGetTimezoneOffset = Date.prototype.getTimezoneOffset;
         hookFunction(Date.prototype, 'getTimezoneOffset', function getTimezoneOffset() {
-            // New York is usually -240 (EDT) or -300 (EST)
-            // We'll mimic -240 (4 hours behind UTC)
-            return 240; 
+            return 240;
         }, 'getTimezoneOffset');
     } catch (e) {}
-
-    if (!isIframe) {
-        console.log(`[STEALTH] Profile: ${hwProfile.cores}C/${hwProfile.memory}GB/${hwProfile.gpu} | TZ: ${targetTZ}`);
-    }
 })();

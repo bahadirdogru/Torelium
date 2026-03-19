@@ -19,6 +19,24 @@ helium_profiles/
 extension/.DS_Store
 extension/Thumbs.db
 
+# Secrets and credentials
+*.env
+*.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+*.cert
+credentials*
+secrets*
+*.secret
+
+# Editor and backup files
+*.bak
+*.swp
+*~
+*.orig
+
 # OS specific files
 .DS_Store
 Thumbs.db
