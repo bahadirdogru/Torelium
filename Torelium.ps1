@@ -22,7 +22,7 @@ $extensionSrc = Join-Path $scriptDir "extension"
 $bridgeToken = [guid]::NewGuid().ToString('N')
 
 $script:profilePath = $null
-$script:bridgeJob = $null
+$script:bridgeProcess = $null
 
 # Expected SHA256 hashes — update these from official release pages when changing versions
 $torExpectedHash = "UPDATE_WITH_REAL_HASH_FROM_TORPROJECT_ORG"
@@ -123,15 +123,14 @@ function New-IsolatedProfile {
 
 function Stop-Bridge {
     $port = 9060
-    $process = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -First 1
-    if ($process) { Stop-Process -Id $process -Force -ErrorAction SilentlyContinue }
-    if ($script:bridgeJob) {
-        Stop-Job $script:bridgeJob -ErrorAction SilentlyContinue
-        Remove-Job $script:bridgeJob -ErrorAction SilentlyContinue
-    } else {
-        Get-Job | Stop-Job -ErrorAction SilentlyContinue
-        Get-Job | Remove-Job -ErrorAction SilentlyContinue
+    if ($script:bridgeProcess -and -not $script:bridgeProcess.HasExited) {
+        Stop-Process -Id $script:bridgeProcess.Id -Force -ErrorAction SilentlyContinue
     }
+    $script:bridgeProcess = $null
+    $owning = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -First 1
+    if ($owning) { Stop-Process -Id $owning -Force -ErrorAction SilentlyContinue }
+    Get-Job -ErrorAction SilentlyContinue | Stop-Job -ErrorAction SilentlyContinue
+    Get-Job -ErrorAction SilentlyContinue | Remove-Job -ErrorAction SilentlyContinue
 }
 
 function Stop-Tor {
@@ -193,11 +192,12 @@ function New-SpoofExtension {
 }
 
 function Invoke-Cleanup {
-    if ($script:bridgeJob) {
-        Stop-Job $script:bridgeJob -ErrorAction SilentlyContinue
-        Remove-Job $script:bridgeJob -ErrorAction SilentlyContinue
-        $script:bridgeJob = $null
+    if ($script:bridgeProcess -and -not $script:bridgeProcess.HasExited) {
+        Stop-Process -Id $script:bridgeProcess.Id -Force -ErrorAction SilentlyContinue
     }
+    $script:bridgeProcess = $null
+    $p9060 = Get-NetTCPConnection -LocalPort 9060 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -First 1
+    if ($p9060) { Stop-Process -Id $p9060 -Force -ErrorAction SilentlyContinue }
     if ($global:torProcess -and -not $global:torProcess.HasExited) {
         Stop-Process -Id $global:torProcess.Id -Force -ErrorAction SilentlyContinue
     }
@@ -217,115 +217,63 @@ $script:profilePath = New-IsolatedProfile
 Start-Tor
 Invoke-TorNewnym
 
-# Start Bridge Job on Port 9060
-$script:bridgeJob = Start-Job -ArgumentList $bridgeToken, $torCookieFile -ScriptBlock {
-    param($token, $cookieFile)
-
-    $listener = New-Object System.Net.HttpListener
-    $listener.Prefixes.Add("http://127.0.0.1:9060/")
-    $listener.Prefixes.Add("http://localhost:9060/")
-    try {
-        $listener.Start()
-        while ($listener.IsListening) {
-            $context = $listener.GetContext()
-            $request = $context.Request
-            $response = $context.Response
-
-            # CORS — token auth provides real security; CORS is permissive for localhost bridge
-            $origin = $request.Headers["Origin"]
-            if ($origin) {
-                $response.Headers.Add("Access-Control-Allow-Origin", $origin)
-            } else {
-                $response.Headers.Add("Access-Control-Allow-Origin", "*")
-            }
-            $response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            $response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, X-Bridge-Token")
-
-            if ($request.HttpMethod -eq "OPTIONS") {
-                $response.StatusCode = 200
-                $response.Close()
-                continue
-            }
-
-            # Token authentication
-            $reqToken = $request.Headers["X-Bridge-Token"]
-            if ($reqToken -ne $token) {
-                $result = @{ success = $false; message = "unauthorized" }
-                $json = $result | ConvertTo-Json -Compress
-                $buffer = [System.Text.Encoding]::UTF8.GetBytes($json)
-                $response.StatusCode = 403
-                $response.ContentType = "application/json"
-                $response.ContentLength64 = $buffer.Length
-                $response.OutputStream.Write($buffer, 0, $buffer.Length)
-                $response.Close()
-                continue
-            }
-
-            $path = $request.Url.AbsolutePath
-            $result = @{ success = $false; message = "Invalid command" }
-
-            if ($path -eq "/ping") { $result = @{ success = $true; message = "pong" } }
-            elseif ($path -eq "/newnym") {
-                try {
-                    $cookieHex = [BitConverter]::ToString([IO.File]::ReadAllBytes($cookieFile)).Replace("-", "")
-                    $tcp = New-Object System.Net.Sockets.TcpClient("127.0.0.1", 9051)
-                    $w = New-Object System.IO.StreamWriter($tcp.GetStream())
-                    $w.AutoFlush = $true
-                    $w.WriteLine("AUTHENTICATE $cookieHex")
-                    $w.WriteLine("SIGNAL NEWNYM")
-                    $w.WriteLine("QUIT")
-                    $tcp.Close()
-                    $result = @{ success = $true; message = "NEWNYM sent" }
-                } catch { $result = @{ success = $false; message = "Tor control error" } }
-            }
-            elseif ($path -eq "/country") {
-                $ip = $request.QueryString["ip"]
-                if ($ip -and $ip -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') {
-                    $country = "Unknown"
-                    try {
-                        $cookieHex = [BitConverter]::ToString([IO.File]::ReadAllBytes($cookieFile)).Replace("-", "")
-                        $tcp = New-Object System.Net.Sockets.TcpClient("127.0.0.1", 9051)
-                        $w = New-Object System.IO.StreamWriter($tcp.GetStream())
-                        $w.AutoFlush = $true
-                        $w.WriteLine("AUTHENTICATE $cookieHex")
-                        $w.WriteLine("GETINFO ip-to-country/$ip")
-                        $reader = New-Object System.IO.StreamReader($tcp.GetStream())
-                        while ($line = $reader.ReadLine()) {
-                            if ($line -match "ip-to-country/.*=([A-Z]{2})") { $country = $matches[1]; break }
-                            if ($line -match "250 OK") { break }
-                        }
-                        $tcp.Close()
-                    } catch {}
-                    $result = @{ success = $true; country = $country }
-                } else {
-                    $result = @{ success = $false; message = "Invalid IP format" }
-                }
-            }
-            $json = $result | ConvertTo-Json -Compress
-            $buffer = [System.Text.Encoding]::UTF8.GetBytes($json)
-            $response.ContentType = "application/json"
-            $response.ContentLength64 = $buffer.Length
-            $response.OutputStream.Write($buffer, 0, $buffer.Length)
-            $response.Close()
-        }
-    } catch { Write-Error "Bridge error occurred" }
+# Verify cookie file exists before starting bridge
+if (-not (Test-Path $torCookieFile)) {
+    Write-Host "[BRIDGE] UYARI: Cookie dosyasi henuz olusturulmadi, bekleniyor..." -ForegroundColor Yellow
+    $cookieWait = 10
+    while (-not (Test-Path $torCookieFile) -and $cookieWait -gt 0) {
+        Start-Sleep 1
+        $cookieWait--
+    }
+    if (-not (Test-Path $torCookieFile)) {
+        Write-Host "[BRIDGE] HATA: Tor cookie dosyasi bulunamadi!" -ForegroundColor Red
+    }
 }
+
+# Bridge: ayri PowerShell sureci + TcpListener (Start-Job + HttpListener bazi ortamlarda Completed/timeout)
+$bridgeScript = Join-Path $scriptDir "Torelium.Bridge.ps1"
+if (-not (Test-Path -LiteralPath $bridgeScript)) {
+    Write-Host "[BRIDGE] HATA: Torelium.Bridge.ps1 bulunamadi: $bridgeScript" -ForegroundColor Red
+    exit 1
+}
+$psHostExe = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+$bridgeArgs = @(
+    '-NoProfile',
+    '-ExecutionPolicy', 'Bypass',
+    '-File', $bridgeScript,
+    '-Token', $bridgeToken,
+    '-CookieFile', $torCookieFile
+)
+$script:bridgeProcess = Start-Process -FilePath $psHostExe -ArgumentList $bridgeArgs -WindowStyle Hidden -PassThru
 
 # Wait for bridge to be ready before starting browser
 $bridgeReady = $false
-$retries = 10
+$retries = 24
 while (-not $bridgeReady -and $retries -gt 0) {
-    Start-Sleep 1
+    Start-Sleep -Milliseconds 500
+    if ($script:bridgeProcess.HasExited) {
+        Write-Host "[BRIDGE] HATA: Bridge sureci cikti (ExitCode: $($script:bridgeProcess.ExitCode)). Port 9060 baska surec tarafindan kullaniliyor olabilir." -ForegroundColor Red
+        break
+    }
     try {
-        $testResp = Invoke-WebRequest -Uri "http://127.0.0.1:9060/ping" -Headers @{ "X-Bridge-Token" = $bridgeToken } -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+        $testResp = Invoke-WebRequest -Uri "http://127.0.0.1:9060/ping" -Headers @{ "X-Bridge-Token" = $bridgeToken } -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
         if ($testResp.StatusCode -eq 200) { $bridgeReady = $true }
-    } catch { $retries-- }
+    }
+    catch {
+        $retries--
+        if ($retries -eq 0) {
+            Write-Host "[BRIDGE] HATA: Baglanti zaman asimi. Son HTTP hatasi: $($_.Exception.Message)" -ForegroundColor Red
+        }
+    }
 }
 if ($bridgeReady) {
     Write-Host "[BRIDGE] Aktif: http://127.0.0.1:9060" -ForegroundColor Green
-} else {
-    Write-Host "[BRIDGE] UYARI: Bridge baslatilamadi! Job durumu kontrol ediliyor..." -ForegroundColor Red
-    Receive-Job $script:bridgeJob -ErrorAction SilentlyContinue
+}
+elseif ($script:bridgeProcess -and -not $script:bridgeProcess.HasExited) {
+    Write-Host "[BRIDGE] UYARI: Surec calisiyor ama /ping yanit vermiyor. Guvenlik yazilimi veya port 9060'i kontrol edin." -ForegroundColor Yellow
+}
+else {
+    Write-Host "[BRIDGE] KRITIK: Bridge baslatilmadi! Extension NEWNYM calismayacak." -ForegroundColor Red
 }
 
 $spoofExtension = New-SpoofExtension $script:profilePath $bridgeToken
@@ -340,7 +288,9 @@ $chromeParams = @(
     "--disable-notifications"
     "--disable-popup-blocking"
     "--proxy-server=socks5://127.0.0.1:9050"
-    "--proxy-bypass-list=`"<-loopback>`""
+    # <-loopback> kaldirildi: o direktif implicit loopback bypass'ini devre disi birakiyordu
+    # Extension yuklenince chrome.proxy API PAC script ile override eder
+    "--proxy-bypass-list=127.0.0.1,localhost"
     "--disable-features=TranslateUI,VizDisplayCompositor"
     "--disable-blink-features=AutomationControlled"
     "--disable-default-apps"
@@ -363,6 +313,7 @@ $chromeParams = @(
     "--disable-plugins-discovery"
     "--disable-device-discovery-notifications"
     "--disable-speech-api"
+    # Gizlilik: arka plan ag (DNS ongorusu vb.). Bridge 127.0.0.1 proxy-bypass ile SOCKS'a gitmez.
     "--disable-background-networking"
     "--disable-background-timer-throttling"
     "--disable-client-side-phishing-detection"

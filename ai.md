@@ -24,7 +24,7 @@ Olası iz bırakma, kaynak sızıntısı ve kararsız çalışma problemlerini e
 *   **Karar:** Helium (Tarayıcı) başlatıldığı anda PowerShell betiğine `$browserProcess | Wait-Process` kancası atıldı.
 *   Tarayıcı penceresi kapandığı milisaniyede tüm Tor ağ bağlantıları (`tor.exe`) otomatik uçurulur. Temiz bir bellek bırakılır.
 *   **Garanti Cleanup (v7.6+):** Ana çalışma bloğu `try/finally` ile sarıldı ve `Register-EngineEvent PowerShell.Exiting` kaydedildi. Bu sayede `Ctrl+C` veya beklenmedik çökmeler dahil her senaryoda `Invoke-Cleanup` fonksiyonu çalışarak Tor süreçleri, Bridge Job ve geçici profil dizini güvenli şekilde temizlenir.
-*   `Stop-Bridge` artık `Get-Job | Stop-Job` ile TÜM job'ları değil, yalnızca `$script:bridgeJob` ID'sine sahip spesifik bridge job'ını hedefler.
+*   `Stop-Bridge` köprü sürecini (`$script:bridgeProcess`) ve 9060 portunu dinleyen süreci sonlandırır; eski oturumlardan kalan `Get-Job` kalıntıları da temizlenir.
 
 ### 2. Geçici Dosya Saklama (Isolation)
 *   Her başlatmada, `$env:TEMP\helium_profiles` dizini altında rastgele yepyeni bir "Profile" klasörü yaratılır.
@@ -49,16 +49,17 @@ Olası iz bırakma, kaynak sızıntısı ve kararsız çalışma problemlerini e
 
 ### 6. Torelium Bridge: Token Tabanlı Kimlik Doğrulaması ve CORS Kısıtlaması
 Manifest V3 mimarisinde Chromium `chrome.sockets` API'sini kısıtladığı için eklentiler doğrudan Tor Control Port (9051) ile konuşamaz. Bu sorunu aşmak için:
-*   **Bridge Mimarisi:** `Torelium.ps1` başlatıcısı, arka planda `http://127.0.0.1:9060` adresinde çalışan hafif bir **HTTP Bridge (PowerShell Background Job)** ayağa kaldırır.
+*   **Bridge Mimarisi:** `Torelium.ps1`, `Torelium.Bridge.ps1` dosyasını **ayrı bir PowerShell sürecinde** (`Start-Process`, gizli pencere) çalıştırır. Köprü **TcpListener** ile `127.0.0.1:9060` üzerinde minimal HTTP/1.1 sunar (`HttpListener`/http.sys ve bazı ortamlarda `Start-Job` ile görülen **Completed + timeout** sorunlarından kaçınmak için).
+*   **Send-TorNewnym Yanıt Doğrulaması (v7.6+):** `Send-TorNewnym` fonksiyonu her Tor kontrol komutu için `StreamReader` ile yanıt okur ve `250 OK` doğrulaması yapar. `AUTHENTICATE` başarısız olursa detaylı hata fırlatılır. `ReadTimeout` (5 saniye) ile Tor yanıt vermezse askıda kalmaz. Eski sürümde yanıt okunmadan bağlantı kapatılıyordu — bu, komutların Tor tarafından işlenmemesine neden olabiliyordu.
 *   **Token Tabanlı Auth (v7.6):** Her başlatmada `$bridgeToken = [guid]::NewGuid().ToString('N')` ile 32 karakterlik rastgele bir token üretilir. Bu token:
-    1.  Bridge Job'a `Start-Job -ArgumentList` ile geçirilir.
+    1.  Köprü sürecine `-Token` parametresi ile geçirilir.
     2.  `New-SpoofExtension` fonksiyonu tarafından extension dizinine `bridge_config.json` olarak yazılır.
     3.  `background.js` başlarken `chrome.runtime.getURL('bridge_config.json')` ile token'ı okur.
     4.  Her Bridge isteğinde `X-Bridge-Token` header'ı ile gönderilir.
     5.  Bridge, gelen token'ı doğrular; eşleşmezse **HTTP 403** döner.
 *   **CORS Kısıtlaması (v7.6):** `Access-Control-Allow-Origin: *` yerine, gelen `Origin` header'ı kontrol edilerek yalnızca `chrome-extension://` ve `http://127.0.0.1` / `http://localhost` pattern'lerine uyan origin'lere izin verilir.
 *   **IP Parametresi Doğrulaması (v7.6):** `/country?ip=` endpoint'inde IP parametresi `^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$` regex'i ile doğrulanır. Bu, Tor Control Protocol komut enjeksiyonunu (`\r\n` ile ek komut gönderme) önler.
-*   **Genel Hata Mesajları (v7.6):** Bridge yanıtlarında `$_` (tam hata stack trace) yerine `"Tor control error"` gibi genel mesajlar döner. Path, ortam değişkeni veya sistem bilgisi sızdırılmaz.
+*   **Detaylı Hata Mesajları (v7.6+):** Bridge, `/newnym` endpoint'inde Tor kontrol portu hatalarını detaylı mesajla döner (`Tor control error: <mesaj>`). Extension popup'u bu mesajı doğrudan kullanıcıya gösterir.
 *   **Dinamik Tor ve Helium Yönetimi:** Başlatıcı, proje dizininde `tor/` ve `helium/` klasörlerini kontrol eder. Yoklarsa resmi kaynaklardan indirir, hash doğrular, ayıklar ve konfigüre eder.
 *   **İletişim Akışı:** Eklenti (Popup veya Background), token içeren `fetch` çağrıları ile köprüye sinyal gönderir. Köprü, token doğruladıktan sonra cookie-authenticated Tor bağlantısı üzerinden sinyalleri (NEWNYM, Country Lookup) paslar.
 
@@ -70,14 +71,15 @@ Manifest V3 mimarisinde Chromium `chrome.sockets` API'sini kısıtladığı içi
 **📁 Extension Dosya Mimarisi (v7.6+):**
 ```
 Torelium/
-├── Torelium.ps1          ← Başlatıcı, Tor Bridge, Token Generator, Cleanup
+├── Torelium.ps1          ← Başlatıcı, Tor, Bridge süreci, Token, Cleanup
+├── Torelium.Bridge.ps1   ← HTTP köprüsü (TcpListener, NEWNYM / country / ping)
 ├── .gitignore            ← Repo temizlik kuralları (Binary, Log, Secret izolasyonu)
 ├── README.md             ← Proje genel rehberi (English)
 ├── ai.md                 ← Teknik mimari ve AI kararları (Bu belge)
 └── extension/
-    ├── manifest.json     ← Manifest V3 tanımı (web_accessible_resources boş)
+    ├── manifest.json     ← Manifest V3 tanımı (proxy, privacy, debugger, tabs)
     ├── spoof.js          ← Content Script (MAIN world, document_start, sıfır log)
-    ├── background.js     ← Service Worker (Token Auth Bridge & CDP, sıfır log)
+    ├── background.js     ← Service Worker (Proxy PAC, Token Auth Bridge & CDP, sıfır log)
     ├── popup.html/js     ← Kontrol Paneli (NEWNYM & CreepJS ID gösterimi)
     ├── checklist.html/js ← Gizlilik Kontrol Paneli (XSS-safe renderCard)
     └── creep_scraper.js  ← Remote CreepJS Scraper (sıfır log)
@@ -140,8 +142,9 @@ Torelium başlatıldığında süreç şu sırayla çalışır:
 6.  Bridge Job, `$bridgeToken` ve `$torCookieFile` ile başlatılır (token auth + cookie auth).
 7.  Spoofing extension profil içine kopyalanır; `bridge_config.json` (token) yazılır.
 8.  `Register-EngineEvent PowerShell.Exiting` ile garanti cleanup kaydedilir.
-9.  Helium tarayıcısı SOCKS5 Tor proxy'si, extension ve stealth argümanları ile 1366x768 pencerede başlatılır.
-10. Tarayıcı kapatıldığı an `Invoke-Cleanup` (`try/finally` bloğu) devreye girer: Bridge Job durdurulur, Tor sonlandırılır, profil silinir.
+9.  Helium tarayıcısı SOCKS5 Tor proxy'si (`--proxy-server=socks5://127.0.0.1:9050`), bypass listesi (`--proxy-bypass-list=127.0.0.1,localhost`), extension ve stealth argümanları ile 1366x768 pencerede başlatılır.
+10. Extension yüklenince `chrome.proxy` API ile PAC script devreye girer: `127.0.0.1` → DIRECT, diğer trafik → SOCKS5. Bu, `--proxy-bypass-list`'in service worker fetch'lerine uygulanmadığı senaryolarda güvenilir bridge iletişimi sağlar.
+11. Tarayıcı kapatıldığı an `Invoke-Cleanup` (`try/finally` bloğu) devreye girer: Bridge Job durdurulur, Tor sonlandırılır, profil silinir.
 
 ## 🚨 CreepJS Analizleri ve İleri Seviye Atlatma (Bypass) Stratejileri
 
@@ -175,12 +178,21 @@ CreepJS üzerinde yapılan kapsamlı testler neticesinde tespit edilen "Yalan (L
 | Tor Control Port Auth | ✅ Çözüldü | CookieAuthentication 1 + hex cookie |
 | Bridge Token Auth | ✅ Çözüldü | GUID token + X-Bridge-Token header |
 | Bridge CORS | ✅ Çözüldü | Origin bazlı izin (chrome-extension / localhost) |
+| Bridge NEWNYM Yanıt Doğrulama | ✅ Çözüldü | StreamReader ile 250 OK doğrulaması, ReadTimeout 5s |
+| Bridge Proxy Bypass | ✅ Çözüldü | `chrome.proxy` PAC script + `<-loopback>` kaldırıldı |
+| Donanım Kimliği Randomizasyonu | ✅ Çözüldü | Seed-tabanlı, deterministik profil üretimi (v7.7+) |
+| Bölgesel Profil (Timezone/Locale) | ✅ Çözüldü | Seed-tabanlı, 16+ bölge (ABD, UK, JP, AU, TR vb.) |
+| Timezone DST Dinamikliği | ✅ Çözüldü | Intl.DateTimeFormat ile dinamik offset hesaplama |
+| Worker/SharedWorker Hooking | ✅ Çözüldü | Blob-wrapper ile worker içi izolasyon önleme |
+| OffscreenCanvas Spoofing | ✅ Çözüldü | 2D ve WebGL için worker-safe gürültü |
+| Error Stack Trace Cleaning | ✅ Çözüldü | extension-id ve file-path gizleme |
+| CreepJS ID Kararlılığı | ⏳ Bekliyor | Randomize sonrası ID'nin değişmemesi sorunu inceleniyor |
 | Canvas Noise | ✅ Çözüldü | Seed-based, oturum-tutarlı, multi-pixel |
 | toString Proxy | ✅ Çözüldü | Recursion guard + Object.prototype.toString |
 | WebGL Tutarlılığı | ✅ Çözüldü | 15 parametre RTX 3060 profiline uygun |
 | XSS Koruması | ✅ Çözüldü | escapeHtml() fonksiyonu eklendi |
 | Cleanup Güvenilirliği | ✅ Çözüldü | try/finally + Register-EngineEvent |
 | Message Sender Kontrolü | ✅ Çözüldü | sender.id doğrulaması eklendi |
-| Hata Mesajı Sızıntısı | ✅ Çözüldü | Genel mesajlar, $_ kaldırıldı |
+| Hata Mesajı Sızıntısı | ✅ Çözüldü | Bridge detaylı hata mesajı döner |
 | .gitignore Güvenliği | ✅ Çözüldü | *.env, *.key, *.pem, credentials* eklendi |
 | Timezone DST Dinamikliği | ⏳ Bekliyor | Sabit offset yerine dinamik hesaplama planlandı |

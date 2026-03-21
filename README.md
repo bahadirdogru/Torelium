@@ -1,17 +1,20 @@
 # Tor + Helium = Torelium
 
-## Torelium Stealth Browser v7.6 🛡️🚀
+## Torelium Stealth Browser v7.7 🛡️🚀
 
 Torelium is a high-privacy, anti-fingerprinting browser suite designed to bypass advanced web security and tracking systems. It integrates the **Helium** browser with the **Tor** network, wrapped in a portable PowerShell orchestrator that automates everything from installation to stealth configuration.
 
 ## 🌟 Key Features
 
-- **CreepJS Proof:** Engineered to pass advanced fingerprinting tests (CreepJS, etc.) with consistent spoofing.
-- **Dynamic Downloader:** Automatically downloads and configures the latest **Tor Expert Bundle** and **Helium Browser** within the project directory. No pre-installation required.
-- **Tor Bridge Architecture:** A custom-built local HTTP bridge (Port 9060) that allows the browser extension to communicate with the Tor Control Port (9051) bypassing Manifest V3 socket limitations.
-- **Portable & Self-Contained:** Everything lives within the project folder. Move the folder to any Windows machine and run.
-- **CDP Leak Protection:** Hybrid locking mechanism to prevent hardware and timezone leaks via background workers (ServiceWorker/WebWorker).
-- **Stealth Injection:** Automatically injects a custom privacy extension into every session for real-time spoofing and circuit control.
+- **CreepJS Proof:** Engineered to pass aggressive fingerprinting (CreepJS, etc.) with high-entropy, consistent spoofing.
+- **Smart Regional Profiles:** 16+ global profiles (US, UK, JP, AU, TR, etc.) with consistent Timezone, Locale, and Languages.
+- **Worker & SharedWorker Protection:** First-class interception for background threads. isolated Workers get the same stealth hooks.
+- **OffscreenCanvas Spoofing:** Noise injection for 2D and WebGL OffscreenCanvas contexts in both Window and Worker scopes.
+- **Zero-Trace Identity Change:** Automatically wipes `localStorage` and `IndexedDB` when a new identity is requested.
+- **Dynamic DST Support:** Real-time seasonal timezone offset calculation using `Intl.DateTimeFormat`.
+- **Tor Bridge Architecture:** A custom local HTTP bridge (Port 9060) that allows the extension to talk to Tor Control Port (9051).
+- **Portable & Self-Contained:** Everything lives within the project folder. No global installation required.
+- **Isolated Profiles:** Every session runs in a fresh, temporary profile directory that is automatically cleaned up on exit.
 
 ## 🏗️ Architecture
 
@@ -43,6 +46,7 @@ Torelium is a high-privacy, anti-fingerprinting browser suite designed to bypass
 
 ## 📁 Project Structure
 - `Torelium.ps1`: Main PowerShell orchestrator.
+- `Torelium.Bridge.ps1`: Local HTTP bridge (separate process, Tor control relay).
 - `extension/`: Source code for the Torelium Stealth Extension.
 - `tor/`: (Generated) Local Tor binaries.
 - `helium/`: (Generated) Local Helium browser binaries.

@@ -132,7 +132,26 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnNewnym) {
         btnNewnym.addEventListener('click', requestNewnym);
     }
-    
+
+    const btnNewHardware = document.getElementById('btnNewHardware');
+    if (btnNewHardware) {
+        btnNewHardware.addEventListener('click', () => {
+            btnNewHardware.disabled = true;
+            const originalHTML = btnNewHardware.innerHTML;
+            btnNewHardware.innerHTML = '<span>⏳</span> Yenileniyor...';
+            
+            chrome.runtime.sendMessage({ action: "newHardwareIdentity" }, (res) => {
+                btnNewHardware.innerHTML = originalHTML;
+                btnNewHardware.disabled = false;
+                if (res && res.success) {
+                    showMessage(res.message, 'success');
+                } else {
+                    showMessage("Hata oluştu.", 'error');
+                }
+            });
+        });
+    }
+
     const btnChecklist = document.getElementById('btnChecklist');
     if (btnChecklist) {
         btnChecklist.addEventListener('click', openChecklist);

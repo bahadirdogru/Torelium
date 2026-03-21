@@ -1,6 +1,22 @@
 // ===== WEBRTC LOCK =====
 chrome.privacy.network.webRTCIPHandlingPolicy.set({ value: 'disable_non_proxied_udp' });
 
+// ===== PROXY: loopback DIRECT, rest through Tor SOCKS5 =====
+chrome.proxy.settings.set({
+    value: {
+        mode: "pac_script",
+        pacScript: {
+            data: `function FindProxyForURL(url, host) {
+                if (host === "127.0.0.1" || host === "localhost" || isInNet(host, "127.0.0.0", "255.0.0.0")) {
+                    return "DIRECT";
+                }
+                return "SOCKS5 127.0.0.1:9050";
+            }`
+        }
+    },
+    scope: 'regular'
+});
+
 // ===== TIMEZONE / LOCALE via CDP =====
 const TZ = "America/New_York";
 const LOCALE = "en-US";
@@ -62,9 +78,20 @@ async function torBridgeRequest(command, params = {}) {
         const headers = {};
         if (BRIDGE_TOKEN) headers['X-Bridge-Token'] = BRIDGE_TOKEN;
         const resp = await fetch(url, { cache: 'no-store', headers });
-        return await resp.json();
+        const text = await resp.text();
+        let data;
+        try {
+            data = text ? JSON.parse(text) : {};
+        } catch {
+            return { success: false, error: 'bridge_bad_response', status: resp.status };
+        }
+        if (!resp.ok && data.success !== false) {
+            data.success = false;
+            if (!data.error) data.error = 'http_' + resp.status;
+        }
+        return data;
     } catch (e) {
-        return { success: false, error: 'bridge_down' };
+        return { success: false, error: 'bridge_down', fetchError: e && e.name };
     }
 }
 
@@ -99,6 +126,16 @@ async function getTorExitIP() {
         return { ip: null, isTor: false, error: 'fetch_failed' };
     }
 }
+
+// ===== SESSION SEED INITIALIZATION =====
+async function initSeed() {
+    const res = await chrome.storage.local.get('hw_seed');
+    if (!res.hw_seed) {
+        const newSeed = Math.floor(Math.random() * 2147483647);
+        await chrome.storage.local.set({ hw_seed: newSeed });
+    }
+}
+initSeed();
 
 // ===== MESSAGE LISTENER =====
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -137,10 +174,44 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 result.count = newnymCount;
                 sendResponse({ success: true, message: "✅ Yeni Tor devresi oluşturuldu.", count: newnymCount });
             } else {
-                sendResponse({ success: false, message: result.error === 'bridge_down' ? "Hata: Torelium Bridge aktif değil. Lütfen .ps1 scriptini kontrol edin." : "Yeni kimlik alınamadı." });
+                let msg;
+                if (result.error === 'bridge_down') {
+                    msg = "Hata: Bridge'e ulaşılamıyor (127.0.0.1:9060). Torelium'u .ps1 ile açın.";
+                } else if (result.message) {
+                    msg = "❌ " + result.message;
+                } else {
+                    msg = "Yeni kimlik alınamadı.";
+                }
+                sendResponse({ success: false, message: msg });
             }
         }).catch(() => {
             sendResponse({ success: false, message: "Sistem hatası oluştu." });
+        });
+        return true;
+    }
+
+    if (request.action === "newHardwareIdentity") {
+        const newSeed = Math.floor(Math.random() * 2147483647);
+        chrome.storage.local.set({ hw_seed: newSeed }).then(() => {
+            chrome.tabs.query({}, (tabs) => {
+                for (let tab of tabs) {
+                    if (tab.id && tab.url && !tab.url.startsWith('chrome://')) {
+                        chrome.scripting.executeScript({
+                            target: { tabId: tab.id },
+                            func: () => {
+                                try {
+                                    sessionStorage.removeItem('__t_seed');
+                                    localStorage.clear();
+                                    if (window.indexedDB && window.indexedDB.databases) {
+                                        window.indexedDB.databases().then(dbs => dbs.forEach(db => window.indexedDB.deleteDatabase(db.name)));
+                                    }
+                                } catch (e) {}
+                            }
+                        }).then(() => { chrome.tabs.reload(tab.id); }).catch(() => { chrome.tabs.reload(tab.id); });
+                    }
+                }
+            });
+            sendResponse({ success: true, message: "✅ Donanım kimliği yenilendi ve tüm izler temizlendi." });
         });
         return true;
     }

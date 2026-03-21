@@ -4,7 +4,7 @@
     "version": "7.6",
     "description": "Advanced Anti-Fingerprint and Stealth Engine",
     "incognito": "split",
-    "permissions": ["privacy", "debugger", "tabs"],
+    "permissions": ["privacy", "debugger", "tabs", "proxy", "storage", "scripting"],
     "host_permissions": [
         "http://127.0.0.1/*",
         "http://localhost/*",
@@ -20,6 +20,14 @@
     "content_scripts": [
         {
             "matches": ["<all_urls>"],
+            "js": ["spoof_bridge.js"],
+            "run_at": "document_start",
+            "world": "ISOLATED",
+            "all_frames": true,
+            "match_about_blank": true
+        },
+        {
+            "matches": ["<all_urls>"],
             "js": ["spoof.js"],
             "run_at": "document_start",
             "world": "MAIN",
@@ -32,5 +40,10 @@
             "run_at": "document_idle"
         }
     ],
-    "web_accessible_resources": []
+    "web_accessible_resources": [
+        {
+            "resources": ["spoof.js"],
+            "matches": ["<all_urls>"]
+        }
+    ]
 }
