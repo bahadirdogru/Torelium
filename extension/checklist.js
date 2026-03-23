@@ -397,12 +397,167 @@ async function runChecks() {
     grid.innerHTML = html;
 }
 
+// ---- Tab Switching ----
+function initTabs() {
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+            tab.classList.add('active');
+            const target = document.getElementById(tab.dataset.target);
+            if (target) target.classList.add('active');
+        });
+    });
+}
+
+// ---- Deep Scrape Logic ----
+const CREEP_PATH_MAP = [
+    { name: "Ana Sayfa", path: "/creepjs/" },
+    { name: "Workers", path: "/creepjs/tests/workers.html" },
+    { name: "Iframes", path: "/creepjs/tests/iframes.html" },
+    { name: "Fonts", path: "/creepjs/tests/fonts.html" },
+    { name: "Timezone", path: "/creepjs/tests/timezone.html" },
+    { name: "Window", path: "/creepjs/tests/window.html" },
+    { name: "Screen", path: "/creepjs/tests/screen.html" },
+    { name: "Prototype", path: "/creepjs/tests/prototype.html" },
+    { name: "DOMRect", path: "/creepjs/tests/domrect.html" },
+    { name: "Emojis", path: "/creepjs/tests/emojis.html" },
+    { name: "Math", path: "/creepjs/tests/math.html" },
+    { name: "Machine", path: "/creepjs/tests/machine.html" },
+    { name: "Extensions", path: "/creepjs/tests/extensions.html" },
+    { name: "Proxy", path: "/creepjs/tests/proxy.html" }
+];
+
+function initDeepScrapeUI() {
+    const list = document.getElementById('progressList');
+    if (!list) return;
+    list.innerHTML = CREEP_PATH_MAP.map(m => `
+        <div class="progress-item waiting" id="p-${m.path.replace(/\//g, '_').replace(/\./g, '_')}">
+           ⏳ ${m.name}
+        </div>
+    `).join('');
+}
+
+function renderDeepResults(results) {
+    const container = document.getElementById('deepScrapeResults');
+    if (!container) return;
+    container.innerHTML = '';
+    
+    // Sort results by CREEP_PATH_MAP order
+    const sortedPaths = CREEP_PATH_MAP.map(m => m.path).filter(p => results[p]);
+    
+    if (sortedPaths.length === 0) {
+        container.innerHTML = '<div class="loading">Henüz veri toplanmadı.</div>';
+        return;
+    }
+
+    for (const path of sortedPaths) {
+        const data = results[path];
+        const card = document.createElement('div');
+        card.className = 'deep-result-card';
+        
+        const liesDetected = data.items.filter(i => i.isLies).length;
+        const totalItems = data.items.length;
+        
+        const header = document.createElement('div');
+        header.className = 'deep-result-header';
+        header.innerHTML = `
+            <div style="display:flex; flex-direction:column;">
+                <strong style="font-size:13px;">${CREEP_PATH_MAP.find(m=>m.path===path)?.name || data.title}</strong>
+                <span style="font-size:10px; color:var(--text-muted);">${path}</span>
+            </div>
+            <span class="badge ${liesDetected > 0 ? 'fail' : 'pass'}">
+                ${liesDetected} / ${totalItems} Tespit
+            </span>
+        `;
+        
+        const body = document.createElement('div');
+        body.className = 'deep-result-body';
+        
+        let rowsHtml = data.items.map(item => `
+            <div class="value-row" style="margin-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.02); padding-bottom:4px;">
+                <span class="value-label" style="font-size:11px;">${escapeHtml(item.label)}</span>
+                <div style="display:flex; flex-direction:column; align-items:flex-end;">
+                    <span class="value-actual ${item.isLies ? 'bad' : 'good'}" style="font-size:11px;">${escapeHtml(item.value)}</span>
+                    ${item.detail ? `<span style="font-size:9px; color:var(--text-muted); text-align:right;">${escapeHtml(item.detail)}</span>` : ''}
+                </div>
+            </div>
+        `).join('');
+        
+        body.innerHTML = `<div class="card-body">${rowsHtml}</div>`;
+        header.addEventListener('click', () => body.classList.toggle('active'));
+        
+        card.appendChild(header);
+        card.appendChild(body);
+        container.appendChild(card);
+    }
+}
+
+function setupDeepScrapeListeners() {
+    const btnStart = document.getElementById('btnStartDeepScrape');
+    if (btnStart) {
+        btnStart.addEventListener('click', () => {
+            initDeepScrapeUI();
+            document.getElementById('deepScrapeProgressArea').style.display = 'block';
+            document.getElementById('deepScrapeStatus').innerText = 'Tarama başlatıldı, sayfalar geziliyor...';
+            document.getElementById('deepScrapeResults').innerHTML = '<div class="loading"><div class="spinner"></div>Veriler toplanıyor...</div>';
+            chrome.runtime.sendMessage({ action: "startDeepScrape" });
+            btnStart.disabled = true;
+            btnStart.style.opacity = "0.5";
+        });
+    }
+
+    chrome.runtime.onMessage.addListener((msg) => {
+        if (msg.action === "deepScrapeProgress") {
+            const id = `p-${msg.path.replace(/\//g, '_').replace(/\./g, '_')}`;
+            const el = document.getElementById(id);
+            if (el) {
+                el.classList.remove('waiting');
+                el.classList.add('done');
+                const name = CREEP_PATH_MAP.find(m => m.path === msg.path)?.name || msg.path;
+                el.innerText = '✅ ' + name;
+            }
+            document.getElementById('deepScrapeStatus').innerText = `Tarama devam ediyor: ${msg.index + 1} / ${msg.total}`;
+        }
+        
+        if (msg.action === "deepScrapeComplete") {
+            document.getElementById('deepScrapeStatus').innerText = 'Tarama tamamlandı! Tüm sayfalar incelendi.';
+            const btnStart = document.getElementById('btnStartDeepScrape');
+            if (btnStart) {
+                btnStart.disabled = false;
+                btnStart.style.opacity = "1";
+                btnStart.innerText = "↻ Taramayı Yeniden Başlat";
+            }
+            renderDeepResults(msg.results);
+        }
+    });
+}
+
 // ---- Init ----
 document.addEventListener('DOMContentLoaded', () => {
     runChecks();
+    initTabs();
+    setupDeepScrapeListeners();
+
+    // Check if there are existing results to display
+    chrome.runtime.sendMessage({ action: "getDeepScrapeResults" }, (results) => {
+        if (results && Object.keys(results).length > 0) {
+            document.getElementById('deepScrapeProgressArea').style.display = 'block';
+            document.getElementById('deepScrapeStatus').innerText = 'Önceki tarama sonuçları yüklendi.';
+            // Mark all as done in UI if viewing old results
+            initDeepScrapeUI();
+            Object.keys(results).forEach(path => {
+                const id = `p-${path.replace(/\//g, '_').replace(/\./g, '_')}`;
+                const el = document.getElementById(id);
+                if (el) { el.classList.remove('waiting'); el.classList.add('done'); }
+            });
+            renderDeepResults(results);
+        }
+    });
 
     const btnRefresh = document.getElementById('btnRefresh');
     if (btnRefresh) {
         btnRefresh.addEventListener('click', runChecks);
     }
 });
+

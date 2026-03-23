@@ -338,6 +338,9 @@ $chromeParams = @(
     "--new-window"
     "https://check.torproject.org/"
     "https://abrahamjuliot.github.io/creepjs/"
+    "https://browseraudit.com/"
+    "https://coveryourtracks.eff.org/"
+    "https://thetest.com/tests/browser"
 )
 
 # Convert array to a single string for Start-Process to avoid argument splitting
@@ -355,7 +358,8 @@ if (Test-Path $helium) {
     finally {
         Invoke-Cleanup
     }
-} else {
+}
+else {
     Write-Host "[HATA] Helium bulunamadi." -ForegroundColor Red
     Invoke-Cleanup
 }

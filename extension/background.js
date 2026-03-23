@@ -50,7 +50,34 @@ setInterval(() => {
 
 // ===== SESSION COUNTER =====
 let newnymCount = 0;
+let hwChangeCount = 0;
 let latestCreepSummary = null;
+
+// ===== CREEPJS DEEP SCRAPER STATE =====
+const CREEP_TEST_URLS = [
+    "https://abrahamjuliot.github.io/creepjs/",
+    "https://abrahamjuliot.github.io/creepjs/tests/workers.html",
+    "https://abrahamjuliot.github.io/creepjs/tests/iframes.html",
+    "https://abrahamjuliot.github.io/creepjs/tests/fonts.html",
+    "https://abrahamjuliot.github.io/creepjs/tests/timezone.html",
+    "https://abrahamjuliot.github.io/creepjs/tests/window.html",
+    "https://abrahamjuliot.github.io/creepjs/tests/screen.html",
+    "https://abrahamjuliot.github.io/creepjs/tests/prototype.html",
+    "https://abrahamjuliot.github.io/creepjs/tests/domrect.html",
+    "https://abrahamjuliot.github.io/creepjs/tests/emojis.html",
+    "https://abrahamjuliot.github.io/creepjs/tests/math.html",
+    "https://abrahamjuliot.github.io/creepjs/tests/machine.html",
+    "https://abrahamjuliot.github.io/creepjs/tests/extensions.html",
+    "https://abrahamjuliot.github.io/creepjs/tests/proxy.html"
+];
+
+let deepScrapeState = {
+    active: false,
+    tabId: null,
+    currentIndex: 0,
+    results: {}
+};
+
 
 // ===== TOR BRIDGE (PowerShell Listener) =====
 const BRIDGE_URL = "http://127.0.0.1:9060";
@@ -158,7 +185,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     country,
                     flag,
                     fpId:    latestCreepSummary ? latestCreepSummary.fpId : null,
-                    count:   newnymCount
+                    count:   newnymCount,
+                    hwCount: hwChangeCount
                 });
             } catch (err) {
                 sendResponse({ ip: null, isTor: false, error: 'critical' });
@@ -191,27 +219,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.action === "newHardwareIdentity") {
+        hwChangeCount++;
         const newSeed = Math.floor(Math.random() * 2147483647);
         chrome.storage.local.set({ hw_seed: newSeed }).then(() => {
             chrome.tabs.query({}, (tabs) => {
                 for (let tab of tabs) {
-                    if (tab.id && tab.url && !tab.url.startsWith('chrome://')) {
+                    if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://') && !tab.url.startsWith('about:')) {
                         chrome.scripting.executeScript({
                             target: { tabId: tab.id },
-                            func: () => {
+                            world: 'MAIN',
+                            func: (s) => {
                                 try {
-                                    sessionStorage.removeItem('__t_seed');
+                                    sessionStorage.setItem('__t_seed', s);
                                     localStorage.clear();
                                     if (window.indexedDB && window.indexedDB.databases) {
                                         window.indexedDB.databases().then(dbs => dbs.forEach(db => window.indexedDB.deleteDatabase(db.name)));
                                     }
                                 } catch (e) {}
-                            }
-                        }).then(() => { chrome.tabs.reload(tab.id); }).catch(() => { chrome.tabs.reload(tab.id); });
+                            },
+                            args: [newSeed]
+                        }).finally(() => { 
+                            chrome.tabs.reload(tab.id, { bypassCache: true }); 
+                        });
                     }
                 }
             });
-            sendResponse({ success: true, message: "✅ Donanım kimliği yenilendi ve tüm izler temizlendi." });
+            sendResponse({ success: true, message: "✅ Yeni donanım kimliği uygulandı.", count: hwChangeCount });
         });
         return true;
     }
@@ -223,6 +256,54 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (request.action === "updateCreepSummary") {
         latestCreepSummary = request.data;
+        return false;
+    }
+
+    if (request.action === "startDeepScrape") {
+        deepScrapeState.active = true;
+        deepScrapeState.currentIndex = 0;
+        deepScrapeState.results = {};
+        
+        chrome.tabs.create({ url: CREEP_TEST_URLS[0], active: false }, (tab) => {
+            deepScrapeState.tabId = tab.id;
+            sendResponse({ success: true, tabId: tab.id });
+        });
+        return true; 
+    }
+
+    if (request.action === "creepScraped") {
+        if (deepScrapeState.active && sender.tab && sender.tab.id === deepScrapeState.tabId) {
+            const data = request.data;
+            deepScrapeState.results[data.path] = data;
+            
+            // Broadcast progress to checklist.js
+            chrome.runtime.sendMessage({ 
+                action: "deepScrapeProgress", 
+                path: data.path, 
+                index: deepScrapeState.currentIndex,
+                total: CREEP_TEST_URLS.length
+            });
+
+            deepScrapeState.currentIndex++;
+            if (deepScrapeState.currentIndex < CREEP_TEST_URLS.length) {
+                chrome.tabs.update(deepScrapeState.tabId, { url: CREEP_TEST_URLS[deepScrapeState.currentIndex] });
+            } else {
+                deepScrapeState.active = false;
+                chrome.runtime.sendMessage({ action: "deepScrapeComplete", results: deepScrapeState.results });
+                
+                setTimeout(() => {
+                    if (deepScrapeState.tabId) {
+                        chrome.tabs.remove(deepScrapeState.tabId).catch(() => {});
+                        deepScrapeState.tabId = null;
+                    }
+                }, 2000);
+            }
+        }
+        return false;
+    }
+
+    if (request.action === "getDeepScrapeResults") {
+        sendResponse(deepScrapeState.results);
         return false;
     }
 

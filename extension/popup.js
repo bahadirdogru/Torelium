@@ -46,7 +46,7 @@ function loadCircuitInfo() {
             exitFPIDEl.textContent = 'bilinmiyor';
             exitFPIDEl.className = 'info-value loading';
         }
-        updateCount(res.count || 0);
+        updateCount(res.count || 0, res.hwCount || 0);
     });
 }
 
@@ -60,8 +60,12 @@ function setTorStatus(connected) {
     }
 }
 
-function updateCount(n) {
-    countEl.textContent = n === 0 ? '0 kimlik değişimi' : `${n}× değiştirildi`;
+let currentIpCount = 0;
+let currentHwCount = 0;
+function updateCount(ip, hw) {
+    if (ip !== undefined) currentIpCount = ip;
+    if (hw !== undefined) currentHwCount = hw;
+    countEl.textContent = `${currentIpCount} IP / ${currentHwCount} kimlik değişimi`;
 }
 
 // ---- Message helpers ----
@@ -145,6 +149,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 btnNewHardware.disabled = false;
                 if (res && res.success) {
                     showMessage(res.message, 'success');
+                    updateCount(undefined, res.count); // res.count here is the new hwCount
+                    setTimeout(loadCircuitInfo, 2000); 
                 } else {
                     showMessage("Hata oluştu.", 'error');
                 }

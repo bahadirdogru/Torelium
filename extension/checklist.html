@@ -353,12 +353,73 @@
   </div>
 </div>
 
-<div id="toreliumView" class="container">
+<div class="tabs">
+  <div class="tab active" data-target="toreliumView">Temel Kontroller</div>
+  <div class="tab" data-target="deepCreepView">Derin CreepJS Analizi</div>
+</div>
+
+<div id="toreliumView" class="view-panel active">
   <div class="summary-banner" id="summaryBanner">
     <div class="loading"><div class="spinner"></div>Testler çalıştırılıyor...</div>
   </div>
   <div id="checkGrid"></div>
 </div>
+
+<div id="deepCreepView" class="view-panel">
+  <div class="summary-banner" id="deepScrapeHeader">
+    <div class="summary-info">
+      <h2>Derin CreepJS Taraması</h2>
+      <p id="deepScrapeStatus">14 farklı CreepJS test sayfasını (Workers, Iframes, Fonts vb.) otomatik olarak inceler.</p>
+    </div>
+    <div class="summary-badges">
+      <button class="btn-creepjs" id="btnStartDeepScrape">🚀 Taramayı Başlat</button>
+    </div>
+  </div>
+
+  <div id="deepScrapeProgressArea" style="display:none; margin-bottom:20px;">
+    <div class="section-title">Tarama İlerlemesi</div>
+    <div id="progressList" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:8px;"></div>
+  </div>
+
+  <div id="deepScrapeResults">
+    <div class="loading" id="deepInitialMsg">Tarama henüz başlatılmadı. "Taramayı Başlat" butonuna tıklayarak başlayabilirsiniz.</div>
+  </div>
+</div>
+
+<style>
+  /* Extra styles for deep scrape results */
+  .deep-result-card {
+    background: var(--surface2);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .deep-result-header {
+    background: rgba(255,255,255,0.03);
+    padding: 10px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+  }
+  .deep-result-header:hover { background: rgba(255,255,255,0.06); }
+  .deep-result-body { padding: 12px 16px; display: none; }
+  .deep-result-body.active { display: block; }
+  .progress-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .progress-item.done { border-color: var(--green); color: #86efac; }
+  .progress-item.waiting { opacity: 0.5; }
+</style>
 
 <script src="checklist.js"></script>
 </body>
