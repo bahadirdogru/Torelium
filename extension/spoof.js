@@ -56,32 +56,16 @@
         } catch (e) {}
     };
 
-    // === 1. DETERMINISTIC SEED (Synced via DOM/Storage/Worker param) ===
+    // === 1. DETERMINISTIC SEED (Injected by Torelium Launcher synchronously) ===
+    const __TORE_SEED__ = 123456789;
+
     const getSeed = () => {
         if (isWorker) {
             const params = new URLSearchParams(self.location.search);
             const s = params.get('__t_seed');
-            return s ? parseInt(s, 10) >>> 0 : 123456789;
+            if (s) return parseInt(s, 10) >>> 0;
         }
-        
-        // Priority 1: Session Storage (Persistent for tab)
-        try {
-            const sess = sessionStorage.getItem('__t_seed');
-            if (sess) return parseInt(sess, 10) >>> 0;
-        } catch (e) {}
-
-        // Priority 2: Dataset from Bridge (New Identity)
-        const ds = document.documentElement.dataset.hwSeed || document.documentElement.getAttribute('data-target-seed');
-        if (ds) {
-            const s = parseInt(ds, 10) >>> 0;
-            try { sessionStorage.setItem('__t_seed', s); } catch (e) {}
-            return s;
-        }
-
-        // Priority 3: Fallback random
-        const s = crypto.getRandomValues(new Uint32Array(1))[0];
-        try { sessionStorage.setItem('__t_seed', s); } catch (e) {}
-        return s;
+        return __TORE_SEED__;
     };
 
     const seed = getSeed();

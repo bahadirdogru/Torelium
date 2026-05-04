@@ -237,12 +237,14 @@ if (-not (Test-Path -LiteralPath $bridgeScript)) {
     exit 1
 }
 $psHostExe = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+$extPathParam = Join-Path $script:profilePath "ToreliumExtension"
 $bridgeArgs = @(
     '-NoProfile',
     '-ExecutionPolicy', 'Bypass',
     '-File', $bridgeScript,
     '-Token', $bridgeToken,
-    '-CookieFile', $torCookieFile
+    '-CookieFile', $torCookieFile,
+    '-ExtPath', $extPathParam
 )
 $script:bridgeProcess = Start-Process -FilePath $psHostExe -ArgumentList $bridgeArgs -WindowStyle Hidden -PassThru
 
@@ -278,8 +280,17 @@ else {
 
 $spoofExtension = New-SpoofExtension $script:profilePath $bridgeToken
 
+$initialSeed = Get-Random -Maximum 2147483647
+$spoofFile = Join-Path $spoofExtension "spoof.js"
+(Get-Content $spoofFile) -replace "const __TORE_SEED__ = \d+;","const __TORE_SEED__ = $initialSeed;" | Set-Content $spoofFile
+
+$defaultDir = Join-Path $script:profilePath "Default"
+New-Item -ItemType Directory -Path $defaultDir -Force | Out-Null
+$prefsFile = Join-Path $defaultDir "Preferences"
+$prefsJson = '{"extensions":{"pinned_extensions":["abhpalikbpidoaleeoblekllgbkdkgfg"]}}'
+Set-Content -Path $prefsFile -Value $prefsJson -Encoding UTF8
+
 # Build a single argument string for better space/quote handling
-$ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.116 Safari/537.36"
 $chromeParams = @(
     "--user-data-dir=""$($script:profilePath)"""
     "--load-extension=""$spoofExtension"""
@@ -326,10 +337,6 @@ $chromeParams = @(
     "--use-angle=d3d11"
     "--max_old_space_size=4096"
     "--lang=en-US"
-    "--force-time-zone=America/New_York"
-    "--tz=America/New_York"
-    "--accept-lang=en-US,en"
-    "--user-agent=""$ua"""
     "--enable-precise-memory-info"
     "--no-first-run"
     "--no-default-browser-check"

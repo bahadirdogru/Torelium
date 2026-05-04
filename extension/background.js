@@ -18,16 +18,77 @@ chrome.proxy.settings.set({
 });
 
 // ===== TIMEZONE / LOCALE via CDP =====
-const TZ = "America/New_York";
-const LOCALE = "en-US";
+let activeTZ = "America/New_York";
+let activeLOCALE = "en-US";
+
+async function alignNetworkAndCDP() {
+    try {
+        const text = await (await fetch(chrome.runtime.getURL('spoof.js'))).text();
+        const match = text.match(/const __TORE_SEED__\s*=\s*(\d+)/);
+        const seed = match ? parseInt(match[1], 10) : 123456789;
+
+        const OS_POOLS = [
+            { os: 'Windows', platform: 'Win32', uaBase: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{VER} Safari/537.36' },
+            { os: 'Apple', platform: 'MacIntel', uaBase: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{VER} Safari/537.36' },
+            { os: 'Linux', platform: 'Linux x86_64', uaBase: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{VER} Safari/537.36' }
+        ];
+        const CHROME_VERSIONS = ['122.0.0.0', '124.0.0.0', '125.0.0.0'];
+        const LOCATIONS = [
+            { locale: 'en-US', zone: 'America/New_York', lang: ['en-US', 'en'] },
+            { locale: 'en-GB', zone: 'Europe/London', lang: ['en-GB', 'en'] },
+            { locale: 'de-DE', zone: 'Europe/Berlin', lang: ['de-DE', 'de', 'en'] },
+            { locale: 'fr-FR', zone: 'Europe/Paris', lang: ['fr-FR', 'fr', 'en'] },
+            { locale: 'ja-JP', zone: 'Asia/Tokyo', lang: ['ja-JP', 'ja', 'en'] },
+            { locale: 'es-ES', zone: 'Europe/Madrid', lang: ['es-ES', 'es', 'en'] },
+            { locale: 'it-IT', zone: 'Europe/Rome', lang: ['it-IT', 'it', 'en'] }
+        ];
+
+        const baseProfile = OS_POOLS[seed % OS_POOLS.length];
+        const ver = CHROME_VERSIONS[seed % CHROME_VERSIONS.length];
+        const loc = LOCATIONS[seed % LOCATIONS.length];
+        const ua = baseProfile.uaBase.replace('{VER}', ver);
+
+        activeTZ = loc.zone;
+        activeLOCALE = loc.locale;
+
+        const acceptLang = loc.lang.join(',') + ';q=0.9';
+        
+        let secPlatform = `"${baseProfile.os}"`;
+        if (baseProfile.os === 'Apple') secPlatform = `"macOS"`;
+        const secChUa = `\"Chromium\";v=\"${ver.split('.')[0]}\", \"Google Chrome\";v=\"${ver.split('.')[0]}\", \"Not-A.Brand\";v=\"99\"`;
+
+        await chrome.declarativeNetRequest.updateDynamicRules({
+            removeRuleIds: [1],
+            addRules: [{
+                id: 1,
+                priority: 1,
+                action: {
+                    type: "modifyHeaders",
+                    requestHeaders: [
+                        { header: "User-Agent", operation: "set", value: ua },
+                        { header: "Accept-Language", operation: "set", value: acceptLang },
+                        { header: "sec-ch-ua", operation: "set", value: secChUa },
+                        { header: "sec-ch-ua-mobile", operation: "set", value: "?0" },
+                        { header: "sec-ch-ua-platform", operation: "set", value: secPlatform }
+                    ]
+                },
+                condition: { 
+                    resourceTypes: ["main_frame", "sub_frame", "xmlhttprequest", "ping", "script", "image", "font", "other", "stylesheet", "websocket"]
+                }
+            }]
+        });
+    } catch(e) {}
+}
+
+alignNetworkAndCDP();
 
 function spoofTarget(targetArg) {
     chrome.debugger.attach(targetArg, "1.3", () => {
         if (chrome.runtime.lastError) {
             if (!chrome.runtime.lastError.message.includes("already attached")) return;
         }
-        chrome.debugger.sendCommand(targetArg, "Emulation.setTimezoneOverride", { timezoneId: TZ }, () => {
-            chrome.debugger.sendCommand(targetArg, "Emulation.setLocaleOverride", { locale: LOCALE }, () => {});
+        chrome.debugger.sendCommand(targetArg, "Emulation.setTimezoneOverride", { timezoneId: activeTZ }, () => {
+            chrome.debugger.sendCommand(targetArg, "Emulation.setLocaleOverride", { locale: activeLOCALE }, () => {});
         });
     });
 }
@@ -154,15 +215,7 @@ async function getTorExitIP() {
     }
 }
 
-// ===== SESSION SEED INITIALIZATION =====
-async function initSeed() {
-    const res = await chrome.storage.local.get('hw_seed');
-    if (!res.hw_seed) {
-        const newSeed = Math.floor(Math.random() * 2147483647);
-        await chrome.storage.local.set({ hw_seed: newSeed });
-    }
-}
-initSeed();
+// INIT REMOVED
 
 // ===== MESSAGE LISTENER =====
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -221,28 +274,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "newHardwareIdentity") {
         hwChangeCount++;
         const newSeed = Math.floor(Math.random() * 2147483647);
-        chrome.storage.local.set({ hw_seed: newSeed }).then(() => {
+        torBridgeRequest('newseed', { seed: newSeed }).then(() => {
             chrome.tabs.query({}, (tabs) => {
                 for (let tab of tabs) {
-                    if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://') && !tab.url.startsWith('about:')) {
-                        chrome.scripting.executeScript({
-                            target: { tabId: tab.id },
-                            world: 'MAIN',
-                            func: (s) => {
-                                try {
-                                    sessionStorage.setItem('__t_seed', s);
-                                    localStorage.clear();
-                                    if (window.indexedDB && window.indexedDB.databases) {
-                                        window.indexedDB.databases().then(dbs => dbs.forEach(db => window.indexedDB.deleteDatabase(db.name)));
-                                    }
-                                } catch (e) {}
-                            },
-                            args: [newSeed]
-                        }).finally(() => { 
-                            chrome.tabs.reload(tab.id, { bypassCache: true }); 
-                        });
+                    if (tab.id && tab.url && !tab.url.startsWith('chrome://')) {
+                        try {
+                            chrome.scripting.executeScript({
+                                target: { tabId: tab.id },
+                                world: 'MAIN',
+                                func: () => {
+                                    try {
+                                        sessionStorage.clear();
+                                        localStorage.clear();
+                                        if (window.indexedDB && window.indexedDB.databases) {
+                                            window.indexedDB.databases().then(dbs => dbs.forEach(db => window.indexedDB.deleteDatabase(db.name)));
+                                        }
+                                    } catch (e) {}
+                                }
+                            }).finally(() => { chrome.tabs.reload(tab.id, { bypassCache: true }); });
+                        } catch(e) {
+                            chrome.tabs.reload(tab.id, { bypassCache: true });
+                        }
                     }
                 }
+                setTimeout(() => { chrome.runtime.reload(); }, 200);
             });
             sendResponse({ success: true, message: "✅ Yeni donanım kimliği uygulandı.", count: hwChangeCount });
         });

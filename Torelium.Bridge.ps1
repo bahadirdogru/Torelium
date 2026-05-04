@@ -2,7 +2,8 @@
 # Kullanim: pwsh -NoProfile -File Torelium.Bridge.ps1 -Token <guid> -CookieFile <path>
 param(
     [Parameter(Mandatory = $true)][string]$Token,
-    [Parameter(Mandatory = $true)][string]$CookieFile
+    [Parameter(Mandatory = $true)][string]$CookieFile,
+    [Parameter(Mandatory = $false)][string]$ExtPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -165,6 +166,28 @@ try {
                 }
                 catch {
                     $result = @{ success = $false; message = "Tor control error: $($_.Exception.Message)" }
+                }
+            }
+            elseif ($path -eq '/newseed') {
+                $q = $uri.Query.TrimStart('?')
+                $seed = "123456789"
+                if ($q -match '(^|&)seed=([^&]+)') {
+                    $seed = [Uri]::UnescapeDataString($matches[2])
+                }
+                if ($seed -match '^\d+$' -and $ExtPath -and (Test-Path $ExtPath)) {
+                    try {
+                        $spoofFile = Join-Path $ExtPath "spoof.js"
+                        if (Test-Path $spoofFile) {
+                            (Get-Content $spoofFile) -replace "const __TORE_SEED__ = \d+;","const __TORE_SEED__ = $seed;" | Set-Content $spoofFile
+                            $result = @{ success = $true; message = "Seed updated" }
+                        } else {
+                            $result = @{ success = $false; message = "spoof.js not found" }
+                        }
+                    } catch {
+                        $result = @{ success = $false; message = $_.Exception.Message }
+                    }
+                } else {
+                    $result = @{ success = $false; message = "Invalid seed or ExtPath missing" }
                 }
             }
             elseif ($path -eq '/country') {

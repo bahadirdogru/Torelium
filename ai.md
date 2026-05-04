@@ -132,6 +132,14 @@ Aşağıdaki tarayıcı API'leri Helium başlatılırken Eklenti tarafından sah
 *   **Dinamik UI Kontrolleri:** `popup.html` üzerinden aktif oturumda Tor kimliği değiştirilebilir (NEWNYM Bridge). `checklist.html` ise tarayıcının o anki gerçek API değerlerini test ederek kullanıcıya güven sağlar. **XSS Koruması (v7.6):** `checklist.js`'te `renderCard` fonksiyonunda tüm dinamik değerler (`r.label`, `r.value`, `item.icon`, `item.title`, kategori adları) `escapeHtml()` fonksiyonu ile sanitize edilir.
 *   **Remote CreepJS Entegrasyonu:** CreepJS raporları `creep_scraper.js` üzerinden canlı `https://abrahamjuliot.github.io/creepjs/` sitesinden kazınarak arka planda Torelium arayüzüne senkronize edilir.
 
+### 12. Ağ (Network) ve DOM Eşleşmesi (DNR) - v7.7
+*   **Sorun:** Chromium PowerShell'den başlatılırken `--user-agent` vb. bayraklarla zorlanan HTTP başlıkları, JS tarafında (`spoof.js`) atanan `navigator` bilgileriyle farklılaşıyor ve "Network Lie" yaratıyordu.
+*   **Çözüm:** PowerShell argümanları temizlendi. Eklentinin arkaplan servisinde `chrome.declarativeNetRequest` (DNR) devreye alındı. Seed üzerinden hesaplanan User-Agent, Accept-Language ve platform değişkenleri dinamik olarak giden HTTP başlıklarına yamanarak ağ ve JS katmanları %100 senkronize edildi.
+
+### 13. Asenkron Çarpışma ve Statik Seed Enjeksiyonu - v7.7
+*   **Sorun:** Asenkron Seed arayışları (`sessionStorage` veya köprü), hızlı IFrame yüklemelerinde veya cross-origin sayfalarda rastgele yeni bir uydurma kimliğe (`crypto.getRandomValues`) düşülmesine yol açıyordu.
+*   **Çözüm:** `spoof_bridge.js` tamamen kaldırıldı. Eklenti yüklenmeden önce PowerShell ve `/newseed` köprü tetikleyicisi (`Torelium.Bridge.ps1`) dosyaya *Regex* ile doğrudan koda statik `const __TORE_SEED__` enjekte eder. Artık gecikme, çarpışma veya sekme atlamasında cihazın/parmak izinin değişmesi imkansızdır.
+
 ## 🚀 Sonuç ve Çalışma Akışı
 Torelium başlatıldığında süreç şu sırayla çalışır:
 1.  TLS 1.2 zorunlu kılınır; `$bridgeToken` üretilir.
@@ -167,7 +175,7 @@ CreepJS üzerinde yapılan kapsamlı testler neticesinde tespit edilen "Yalan (L
 *   **Sorun:** Yalnızca GPU adı ve vendor spoof edilip diğer parametreler dokunulmadığı için `hasBadWebGL: true` işaretleniyordu.
 *   **Çözüm (v7.6 — Uygulandı):** RTX 3060 profiline uygun **15 WebGL parametresi** (MAX_TEXTURE_SIZE, MAX_VIEWPORT_DIMS, ALIASED_LINE_WIDTH_RANGE vb.) tutarlı şekilde spoof ediliyor. Gürültü algoritması yumuşatıldı.
 
-## 📋 Güvenlik Denetim Özeti (v7.6)
+## 📋 Güvenlik Denetim Özeti (v7.7)
 
 | Kategori | Durum | Açıklama |
 |----------|-------|----------|
@@ -186,7 +194,7 @@ CreepJS üzerinde yapılan kapsamlı testler neticesinde tespit edilen "Yalan (L
 | Worker/SharedWorker Hooking | ✅ Çözüldü | Blob-wrapper ile worker içi izolasyon önleme |
 | OffscreenCanvas Spoofing | ✅ Çözüldü | 2D ve WebGL için worker-safe gürültü |
 | Error Stack Trace Cleaning | ✅ Çözüldü | extension-id ve file-path gizleme |
-| CreepJS ID Kararlılığı | ⏳ Bekliyor | Randomize sonrası ID'nin değişmemesi sorunu inceleniyor |
+| CreepJS ID Kararlılığı | ✅ Çözüldü | Statik Seed doğrudan enjeksiyonu ve iframe izolasyonu ile stabil. |
 | Canvas Noise | ✅ Çözüldü | Seed-based, oturum-tutarlı, multi-pixel |
 | toString Proxy | ✅ Çözüldü | Recursion guard + Object.prototype.toString |
 | WebGL Tutarlılığı | ✅ Çözüldü | 15 parametre RTX 3060 profiline uygun |
@@ -195,4 +203,3 @@ CreepJS üzerinde yapılan kapsamlı testler neticesinde tespit edilen "Yalan (L
 | Message Sender Kontrolü | ✅ Çözüldü | sender.id doğrulaması eklendi |
 | Hata Mesajı Sızıntısı | ✅ Çözüldü | Bridge detaylı hata mesajı döner |
 | .gitignore Güvenliği | ✅ Çözüldü | *.env, *.key, *.pem, credentials* eklendi |
-| Timezone DST Dinamikliği | ⏳ Bekliyor | Sabit offset yerine dinamik hesaplama planlandı |
